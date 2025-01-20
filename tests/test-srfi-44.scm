@@ -1,15 +1,19 @@
-;; SRFI 64 tests for SRFI 44: Collections.
+;; Tests for SRFI 44: Collections.
 ;; To run: chibi-scheme/gosh -A. tests/test-srfi-44.scm
 
 ;; SPDX-License-Identifier: MIT
 ;; SPDX-FileCopyrightText: 2024 Antero Mejr <mail@antr.me>
 
-(import (except (scheme base) vector? make-vector vector map
-                list? make-list list string? make-string string)
+(import (except (scheme base)
+                vector? make-vector vector map vector-copy vector-ref
+                vector-set! vector->list
+                list? make-list list list-ref list-set! list-copy
+                string? make-string string string-copy string-ref string->list
+                string-set!)
+        (prefix (only (scheme base) list-ref) r7rs:)
         (srfi 8)
         (srfi 44)
         (srfi 64))
-(import (scheme write))
 
 (test-begin "SRFI-44")
 
@@ -59,7 +63,7 @@
                (purely-mutable-collection? (string #\a #\b #\c))))
 
 (test-group "ordered-collection"
-  (let ((ocol (make-ordered-collection list-ref)))
+  (let ((ocol (make-ordered-collection r7rs:list-ref)))
     (sequence-insert-right! ocol 1)
     (sequence-insert-right! ocol 2)
     (sequence-insert-right! ocol 3)
@@ -70,31 +74,33 @@
     (test-assert "get-right" (= 3 (ordered-collection-get-right ocol)))
     (receive (rest l) (ordered-collection-delete-left ocol)
       (test-assert "delete-left" (= 1 l)))
-    (let ((ocol2 (make-ordered-collection list-ref)))
+    (let ((ocol2 (make-ordered-collection r7rs:list-ref)))
       (sequence-insert-right! ocol2 1)
       (sequence-insert-right! ocol2 2)
       (sequence-insert-right! ocol2 3)
       (test-assert "equality" (collection= = ocol ocol2)))
-    (let ((my-list (make-ordered-collection list-ref)))
+    (let ((my-list (make-ordered-collection r7rs:list-ref)))
       (sequence-insert-right! my-list 1)
       (sequence-insert-right! my-list 2)
       (receive (c v) (ordered-collection-delete-left! my-list)
         (test-assert "delete-left! (value)" (= v 1))
-        (test-assert "delete-left!" (collection= = (sequence 1 2) my-list))))
-    (let ((my-list (make-ordered-collection list-ref)))
+        (test-assert "delete-left!"
+                     (collection=
+                      = (sequence-insert-right
+                         (make-ordered-collection r7rs:list-ref) 2)
+                      my-list))))
+    (let ((my-list (make-ordered-collection r7rs:list-ref)))
       (sequence-insert-right! my-list 1)
       (receive (rest r) (ordered-collection-delete-right my-list)
         (test-assert "delete-right (value)" (= 1 r))
         (test-assert "delete-right (collection)" (collection-empty? rest))))
-    (let ((ocol2 (make-ordered-collection list-ref)))
+    (let ((ocol2 (make-ordered-collection r7rs:list-ref)))
       (sequence-insert-right! ocol2 1)
       (receive (_ r) (ordered-collection-delete-right! ocol2)
         (test-assert "delete-right!" (collection-empty? ocol2))))
     (test-assert "make-*"
                  (ordered-collection?
-                  (make-ordered-collection
-                   (lambda (col x)
-                     (list-ref (collection->list col) x)))))))
+                  (make-ordered-collection r7rs:list-ref)))))
 
 (test-group "directional-collection"
   ;; (test-assert "predicate" (directional-collection? (sequence 1 2 3)))
@@ -181,6 +187,7 @@
     (set-add! s 1)
     (test-assert "add!" (collection= = (set-add (set 2 3) 1) (set 3 2 1))))
   (test-assert "delete" (collection= = (set-delete (set 1 2 3) 2) (set 1 3)))
+  (test-assert "count" (= 1 (set-count (set 2 2 2) 2)))
   (let ((s (set 1 2 3)))
     (set-delete! s 2)
     (test-assert "delete!" (collection= =  s (set 1 3))))
@@ -233,6 +240,7 @@
   (test-assert "put" (collection=
                       equal? (receive (m _) (map-put (map (cons 'a 0)) 'a 1) m)
                       (map (cons 'a 1))))
+  (test-assert "count" (= 2 (map-count (map (cons 1 2) (cons 1 2)) (cons 1 2))))
   (let ((m (map (cons 'a 1))))
     (map-put! m 'a 2)
     (test-assert "put!" (collection= equal? (map (cons 'a 2)) m)))
@@ -343,6 +351,56 @@
 
 (test-group "alist-map"
   (test-assert "predicate" (alist-map? (make-alist-map =)))
-  (test-assert "constructor" (alist-map? (alist-map '(1 . 2) '(3 . 4)))))
+  (test-assert "constructor" (alist-map? (alist-map eq? '(1 . 2) '(3 . 4))))
+  (test-assert "delete-all" (collection=
+                             equal?
+                             (alist-map-delete-all (alist-map eq? (cons 'a 1)
+                                                              (cons 'a 2))
+                                                   'a)
+                             (alist-map eq?)))
+  (let ((am (alist-map eq? (cons 'a 1) (cons 'a 2))))
+    (alist-map-delete-all! am 'a)
+    (test-assert "delete-all!" (collection= equal? am (alist-map eq?))))
+  (test-assert "delete-all-from"
+               (collection= equal?
+                            (alist-map-delete-all-from
+                             (alist-map eq? (cons 'a 1) (cons 'b 2))
+                             (bag 'a 'b))
+                            (alist-map eq?)))
+  (let ((am (alist-map eq? (cons 'a 1) (cons 'b 2))))
+    (alist-map-delete-all-from! am (bag 'a 'b))
+    (test-assert "delete-all-from!" (collection= equal? am (alist-map eq?))))
+  (test-assert "get-all" (equal? '(1 2) (alist-map-get-all
+                                         (alist-map eq? (cons 'a 1) (cons 'a 2))
+                                         'a)))
+
+  (test-assert "key count" (= 2 (alist-map-key-count
+                                 (alist-map eq? (cons 'a 1) (cons 'a 2)) 'a)))
+  (test-assert "replace-all" (collection=
+                              equal?
+                              (alist-map eq? (cons 'a 3) (cons 'a 3))
+                              (alist-map-replace-all
+                               (alist-map eq? (cons 'a 1) (cons 'a 2)) 'a 3)))
+  (let ((am (alist-map eq? (cons 'a 1) (cons 'a 2))))
+    (alist-map-replace-all! am 'a 3)
+    (test-assert "replace-all!"
+                 (collection= equal? am (alist-map eq? (cons 'a 3)
+                                                   (cons 'a 3)))))
+  (test-assert "update-all"
+               (collection= equal? (alist-map eq? (cons 'a 1) (cons 'a 2))
+                            (alist-map-update-all
+                             (alist-map eq? (cons 'a 0) (cons 'a 1))
+                             'a (lambda (x) (+ x 1)))))
+  (test-assert "update-all (thunk)"
+               (collection= equal? (alist-map eq? (cons 'a 0) (cons 'a 0)
+                                              (cons 'b 2))
+                            (alist-map-update-all
+                             (alist-map eq? (cons 'a 0) (cons 'a 1))
+                             'b (lambda (x) (+ x 1)) (lambda _ 2))))
+  (let ((am (alist-map eq? (cons 'a 1) (cons 'a 2))))
+    (alist-map-update-all! am 'a (lambda (x) (+ x 1)))
+    (test-assert "update-all!"
+                 (collection= equal? am (alist-map eq? (cons 'a 2)
+                                                   (cons 'a 3))))))
 
 (test-end)

@@ -8,9 +8,9 @@
 ;; This SRFI was finalized in an incomplete state.
 ;; The sample implementation is complicated and also incomplete (doesn't parse).
 ;; This version uses lists and records with inheritance.
-;; It also minimized the amount of exported identifiers by dispatching.
-;; The full set of identifier alias exports are commented out at the end.
-;; By design, some of the full set of aliases are invalid for certain sub-types.
+;; It also minimizes the amount of exported identifiers by dispatching.
+;; The full set of aliased exports are commented out at the end.
+;; By design, some of the full set of aliases are invalid for certain types.
 
 ;; Uncertainties in the specification:
 ;; - Provides collection-count, but collections don't have the required
@@ -19,13 +19,15 @@
 ;;   set or initialize them. Used equal? and eqv? as the defaults.
 ;; - It is unclear what an ordering function is. Here, ordering functions take
 ;;   a list and a natural number from 0 to size-1, and higher arguments
-;;   will return the higher precendence items. That way the function can be
-;;   stateless. It's the same signature as list-ref.
+;;   will return the higher precendence items. It's the same signature as
+;;   list-ref.
 ;; - There is no way to set homogeneity, immutability, pure-mutability,
 ;;   directionality, or orderedness properties.
-;; - It is unclear why directionality/orderedness are mutually exclusive.
+;; - Why directionality/orderedness are mutually exclusive.
+;; - What the optional thunk argument does in alist-map-update-all. This
+;;   implementation ignores it.
 
-;; This SRFI can be considered superseded by:
+;; Superseding (and better) SRFIs for these data structures are:
 ;; - bag/set: SRFI 113
 ;; - map: SRFI 146
 ;; - sequence: SRFI 133
@@ -33,93 +35,17 @@
 
 (define-library (srfi 44)
   (import (except (scheme base) define-record-type vector? make-vector vector
-                  list? make-list list string? make-string string map)
-          (rename (only (scheme base) map list) (map r7rs:map) (list r7rs:list))
+                  list? make-list list string? make-string string map
+                  vector-ref string-ref list-ref string->list string-copy
+                  vector->list vector-copy vector-set!)
+          (prefix (only (scheme base) map list list-ref) r7rs:)
           (scheme case-lambda)
-          (scheme write)
           (except (srfi 1) map)
           (srfi 8)
           (srfi 256))
-  (export
-
-   ;; Collection (base class)
-   collection? collection-name make-collection
-   collection-size
-   collection-get-any collection-empty? collection->list
-   collection-clear collection-clear! collection=
-   collection collection-copy collection-fold-left collection-fold-right
-
-   ;; Limited collection (collection property)
-   limited-collection?
-
-   ;; Purely mutable collection (collection property)
-   purely-mutable-collection?
-
-   ;; Ordered collections (collection property)
-   ordered-collection? make-ordered-collection
-   ordered-collection-ordering-function
-   ordered-collection-get-left ordered-collection-get-right
-   ordered-collection-delete-left ordered-collection-delete-right
-   ordered-collection-delete-left! ordered-collection-delete-right!
-
-   ;; Directional collection (collection property)
-   directional-collection?
-   directional-collection-get-left directional-collection-get-right
-   directional-collection-insert-left directional-collection-insert-right
-   directional-collection-insert-left! directional-collection-insert-right!
-   directional-collection-delete-left directional-collection-delete-right
-   directional-collection-delete-left! directional-collection-delete-right!
-
-   ;; Bag (inherit collection)
-   bag? make-bag bag bag-equivalence-function
-   bag-count bag-contains? bag-add bag-add!
-   bag-delete bag-delete! bag-delete-all bag-delete-all!
-   bag-add-from bag-add-from! bag-delete-from bag-delete-from!
-   bag-delete-all-from bag-delete-all-from!
-
-   ;; Set (inherit collection)
-   set? make-set set set-equivalence-function set-contains? set-subset?
-   set-add set-add! set-delete set-delete! set-union set-union!
-   set-intersection set-intersection! set-difference set-difference!
-   set-symmetric-difference set-symmetric-difference!
-   set-add-from set-add-from! set-delete-from set-delete-from!
-
-   ;; Map (inherit collection)
-   map? make-map map map-equivalence-function map-key-equivalence-function
-   map-contains-key? map-keys->list map-get map-put map-put!
-   map-update map-update! map-delete map-delete!
-   map-delete-from map-delete-from! map-add-from map-add-from!
-   map-fold-keys-left map-fold-keys-right
-
-   ;; Sequence (inherit bag)
-   sequence? make-sequence sequence
-   sequence-ref sequence-get-left sequence-get-right
-   sequence-insert-right sequence-insert-right!
-   sequence-set sequence-set! sequence-replace-from sequence-replace-from!
-   sequence-fold-keys-left sequence-fold-keys-right
-
-   ;; Flexible sequence (inherit sequence)
-   flexible-sequence? make-flexible-sequence flexible-sequence
-   flexible-sequence-insert flexible-sequence-insert!
-   flexible-sequence-delete-at flexible-sequence-delete-at!
-
-   ;; Vector (inherit sequence)
-   vector? make-vector vector
-
-   ;; List (inherit flexible-sequence)
-   list? make-list list
-
-   ;; String (inherit sequence)
-   string? make-string string
-
-   ;; alist-map (inherit map)
-   alist-map? make-alist-map alist-map)
-
   (begin
 
-    ;; Dispatching and utilities
-
-    ;; FIXME: There is probably a better way to do this. Copy then mutate?
+    ;; SLOW: There is probably a better way to do this. Copy then mutate?
     (define (get-constructor col)
       (let ((name (collection-name col))
             (pmut (collection-purely-mutable? col))
@@ -183,6 +109,8 @@
       collection?
       (name collection-name)
       (lst collection-list collection-list-set!)
+      ;; XXX: purely-mutable?, immutable?, limited? and directional? should
+      ;; be combined into a single list of symbols.
       (purely-mutable? collection-purely-mutable?)
       (immutable? collection-immutable?)
       (limited? collection-limited?)
@@ -235,7 +163,8 @@
     (define (collection= equiv col . rest)
       (if (null? rest)
           #t
-          (and (if (or (collection-ordering-function col)
+          (and (eq? (collection-name col) (collection-name (car rest)))
+               (if (or (collection-ordering-function col)
                        (collection-directional? col))
                    ;; Ordered case
                    (every equiv (collection->list col)
@@ -256,7 +185,7 @@
           (if (>= i size)
               (apply values seeds)
               (receive (proceed? . new-seeds)
-                  (apply f (list-ref (collection->list seq) i) seeds)
+                  (apply f (r7rs:list-ref (collection->list seq) i) seeds)
                 (if (= (length new-seeds) seed-count)
                     (if proceed?
                         (loop new-seeds (+ i 1))
@@ -272,7 +201,7 @@
           (if (negative? i)
               (apply values seeds)
               (receive (proceed? . new-seeds)
-                  (apply f (list-ref (collection->list seq) i) seeds)
+                  (apply f (r7rs:list-ref (collection->list seq) i) seeds)
                 (if (= (length new-seeds) seed-count)
                     (if proceed?
                         (loop new-seeds (- i 1))
@@ -342,7 +271,7 @@
              (big (f (collection->list col) 0))
              (new-lst (r7rs:map (lambda (x)
                                   (f (collection->list col) x))
-                                (iota (max 0 (- (collection-size col) 1)) 0))))
+                                (iota (max 0 (- (collection-size col) 1)) 1))))
         (values ((get-constructor col) new-lst) big)))
 
     (define (ordered-collection-delete-left! col)
@@ -354,7 +283,7 @@
              (big (f (collection->list col) 0))
              (new-lst (r7rs:map (lambda (x)
                                   (f (collection->list col) x))
-                                (iota (max 0 (- (collection-size col) 1)) 0))))
+                                (iota (max 0 (- (collection-size col) 1)) 1))))
         (collection-list-set! col new-lst)
         (values col big)))
 
@@ -376,7 +305,7 @@
     (define (directional-collection? obj)
       (and (collection? obj) (collection-directional? obj)))
 
-    (define directional-ordering-function list-ref)
+    (define directional-ordering-function r7rs:list-ref)
 
     (define directional-collection-get-left
       (case-lambda
@@ -506,7 +435,7 @@
       b)
 
     (define (delete-one equiv val lst)
-      ;; FIXME: slow?
+      ;; SLOW: I think this is slower than it could be?
       (let loop ((out '())
                  (lst lst))
         (cond ((null? lst)
@@ -610,6 +539,14 @@
                                            (collection->list s) val))
       s)
 
+    (define (set-count s val)
+      (let loop ((lst (collection->list s)))
+        (if (null? lst)
+            0
+            (if ((set-equivalence-function s) val (car lst))
+                1
+                (loop (cdr lst))))))
+
     (define (set-delete s val)
       ((get-constructor s) (delete-one (set-equivalence-function s)
                                        val (collection->list s) )))
@@ -710,6 +647,15 @@
     (define (map-keys->list m)
       (r7rs:map car (collection->list m)))
 
+    (define (map-count m val)
+      (let loop ((c 0)
+                 (lst (collection->list m)))
+        (if (null? lst)
+            c
+            (if ((map-equivalence-function m) (car lst) val)
+                (loop (+ 1 c) (cdr lst))
+                (loop c (cdr lst))))))
+
     (define map-get
       (case-lambda
        ((m key) (map-get m key (lambda _ #f)))
@@ -785,12 +731,12 @@
 
     (define (map-delete-from m b)
       (let* ((func (lambda (x y)
-                     ((map-key-equivalence-function m) x y)))
+                     ((map-key-equivalence-function m) x (car y))))
              (new (fold (lambda (x acc)
                           (delete-one func x acc))
                         (collection->list m)
                         (collection->list b))))
-        ((get-constructor b) new)))
+        ((get-constructor m) new)))
 
     (define (map-delete-from! m b)
       (let* ((func (lambda (x y)
@@ -909,6 +855,9 @@
 
     ;; Sequence (inherit bag)
 
+    ;; XXX: There is some overlap with directional-collection that can be
+    ;; cleaned up.
+
     (define-record-type (<sequence> <bag>)
       (mk-sequence b)
       sequence?)
@@ -930,18 +879,10 @@
        ((s i thk)
         (let ((lst (collection->list s)))
           (if (and (>= i 0) (< i (length lst)))
-              (list-ref lst i)
+              (r7rs:list-ref lst i)
               (thk))))))
 
-    (define sequence-get-left
-      (case-lambda
-       ((s) (sequence-get-left s (lambda _ (error "Sequence empty" s))))
-       ((s thk) (sequence-ref s 0 thk))))
-
-    (define sequence-get-right
-      (case-lambda
-       ((s) (sequence-get-right s (lambda _ (error "Sequence empty" s))))
-       ((s thk) (sequence-ref s (- (collection-size s) 1) thk))))
+    ;; SLOW: These can be conses, not appends.
 
     (define (sequence-insert-right s val)
       ((get-constructor s) (append (collection->list s) (r7rs:list val))))
@@ -1145,7 +1086,520 @@
         (error "alist-map must be initialized with pairs" rest))
       (mk-alist-map (mk-map (mk-collection 'alist-map rest #f #f #f #f #f)
                             equiv equiv)))
+
+    (define (alist-map-delete-all am k)
+      ((get-constructor am)
+       (filter (lambda (x)
+                 (not ((map-key-equivalence-function am) (car x) x)))
+               (collection->list am))))
+
+    (define (alist-map-delete-all! am k)
+      (collection-list-set!
+       am
+       (filter (lambda (x)
+                 (not ((map-key-equivalence-function am) (car x) x)))
+               (collection->list am)))
+      am)
+
+    (define (alist-map-delete-all-from am b)
+      ((get-constructor am)
+       (filter (lambda (x)
+                 (not (member (car x) (collection->list b)
+                              (map-equivalence-function am))))
+               (collection->list am))))
+
+    (define (alist-map-delete-all-from! am b)
+      (collection-list-set!
+       am
+       (filter (lambda (x)
+                 (not (member (car x) (collection->list b)
+                              (map-equivalence-function am))))
+               (collection->list am)))
+      am)
+
+    (define (alist-map-get-all am k)
+      (r7rs:map cdr
+                (filter (lambda (x)
+                          ((map-key-equivalence-function am) (car x) k))
+                        (collection->list am))))
+
+    (define (alist-map-key-count am k)
+      (fold (lambda (x acc)
+              (if ((map-key-equivalence-function am) (car x) k)
+                  (+ 1 acc)
+                  acc))
+            0
+            (collection->list am)))
+
+    (define (alist-map-replace-all am k val)
+      ((get-constructor am)
+       (r7rs:map (lambda (x)
+                   (if ((map-key-equivalence-function am) (car x) k)
+                       (cons k val)
+                       x))
+                 (collection->list am))))
+
+    (define (alist-map-replace-all! am k val)
+      (collection-list-set!
+       am
+       (r7rs:map (lambda (x)
+                   (if ((map-key-equivalence-function am) (car x) k)
+                       (cons k val)
+                       x))
+                 (collection->list am)))
+      am)
+
+    (define alist-map-update-all
+      (case-lambda
+       ((am k func) (alist-map-update-all am k func (lambda _ #f)))
+       ((am k func thk)
+        ;; NOTE: I have no idea why thunk is needed here.
+        ((get-constructor am)
+         (r7rs:map (lambda (x)
+                     (if ((map-key-equivalence-function am) (car x) k)
+                         (cons k (func (cdr x)))
+                         x))
+                   (collection->list am))))))
+
+    (define alist-map-update-all!
+      (case-lambda
+       ((am k func) (alist-map-update-all! am k func (lambda _ #f)))
+       ((am k func thk)
+        (collection-list-set!
+         am
+         (r7rs:map (lambda (x)
+                     (if ((map-key-equivalence-function am) (car x) k)
+                         (cons k (func (cdr x)))
+                         x))
+                   (collection->list am)))
+        am)))
   )
-  #| (export)
-  |#
+  (export alist-map?
+          alist-map
+          ;; TODO
+          alist-map-delete-all
+          alist-map-delete-all!
+          alist-map-delete-all-from
+          alist-map-delete-all-from!
+          alist-map-get-all
+          alist-map-key-count
+          alist-map-replace-all
+          alist-map-replace-all!
+          alist-map-update-all
+          alist-map-update-all!
+          make-alist-map
+          (rename collection-empty? alist-map-empty?)
+          (rename collection->list alist-map->list)
+          (rename collection-clear alist-map-clear)
+          (rename collection-clear! alist-map-clear!)
+          (rename collection-copy alist-map-copy)
+          (rename collection-fold-left alist-map-fold-left)
+          (rename collection-fold-right alist-map-fold-right)
+          (rename collection-get-any alist-map-get-any)
+          (rename collection-size alist-map-size)
+          (rename collection= alist-map=)
+          (rename map-add-from alist-map-add-from)
+          (rename map-add-from! alist-map-add-from!)
+          (rename map-contains-key? alist-map-contains-key?)
+          (rename map-count alist-map-count)
+          (rename map-delete alist-map-delete)
+          (rename map-delete! alist-map-delete!)
+          (rename map-delete-from alist-map-delete-from)
+          (rename map-delete-from! alist-map-delete-from!)
+          (rename map-equivalence-function alist-map-equivalence-function)
+          (rename map-fold-keys-left alist-map-fold-keys-left)
+          (rename map-fold-keys-right alist-map-fold-keys-right)
+          (rename map-get alist-map-get)
+          (rename map-key-equivalence-function
+                  alist-map-key-equivalence-function)
+          (rename map-keys->list alist-map-keys->list)
+          (rename map-put alist-map-put)
+          (rename map-put! alist-map-put!)
+          (rename map-update alist-map-update)
+          (rename map-update! alist-map-update!)
+
+          bag
+          bag-add
+          bag-add!
+          bag-add-from
+          bag-add-from!
+          bag-contains?
+          bag-count
+          bag-delete
+          bag-delete!
+          bag-delete-all
+          bag-delete-all!
+          bag-delete-all-from
+          bag-delete-all-from!
+          bag-delete-from bag-delete-from!
+          bag-equivalence-function
+          bag?
+          make-bag
+          (rename collection->list bag->list)
+          (rename collection-clear bag-clear)
+          (rename collection-clear! bag-clear!)
+          (rename collection-copy bag-copy)
+          (rename collection-empty? bag-empty?)
+          (rename collection-fold-left bag-fold-left)
+          (rename collection-fold-right bag-fold-right)
+          (rename collection-get-any bag-get-any)
+          (rename collection-size bag-size)
+          (rename collection= bag=)
+
+          collection
+          collection->list
+          collection-clear
+          collection-clear!
+          collection-copy
+          collection-empty?
+          collection-fold-left
+          collection-fold-right
+          collection-get-any
+          collection-name
+          collection-size
+          collection=
+          collection?
+          make-collection
+          (rename bag-count collection-count)
+          (rename directional-collection-insert-left! collection-insert-left!)
+          (rename directional-collection-delete-left collection-delete-left)
+          (rename directional-collection-delete-left! collection-delete-left!)
+          (rename directional-collection-delete-right collection-delete-right)
+          (rename directional-collection-delete-right! collection-delete-right!)
+          (rename directional-collection-get-left collection-get-left)
+          (rename directional-collection-get-right collection-get-right)
+          (rename directional-collection-insert-left collection-insert-left)
+          (rename ordered-collection-ordering-function
+                  collection-ordering-function)
+          (rename sequence-fold-keys-left collection-fold-keys-left)
+          (rename sequence-fold-keys-right collection-fold-keys-right)
+
+          directional-collection?
+          directional-collection-get-left
+          directional-collection-get-right
+          directional-collection-insert-left
+          directional-collection-insert-right
+          directional-collection-insert-left!
+          directional-collection-insert-right!
+          directional-collection-delete-left
+          directional-collection-delete-right
+          directional-collection-delete-left!
+          directional-collection-delete-right!
+
+          flexible-sequence
+          flexible-sequence-delete-at
+          flexible-sequence-delete-at!
+          flexible-sequence-insert
+          flexible-sequence-insert!
+          flexible-sequence?
+          make-flexible-sequence
+          (rename bag-count flexible-sequence-count)
+          (rename collection->list flexible-sequence->list)
+          (rename collection-clear flexible-sequence-clear)
+          (rename collection-clear! flexible-sequence-clear!)
+          (rename collection-copy flexible-sequence-copy)
+          (rename collection-empty? flexible-sequence-empty?)
+          (rename collection-fold-left flexible-sequence-fold-left)
+          (rename collection-fold-right flexible-sequence-fold-right)
+          (rename collection-get-any flexible-sequence-get-any)
+          (rename collection-size flexible-sequence-size)
+          (rename collection= flexible-sequence=)
+          (rename directional-collection-delete-left
+                  flexible-sequence-delete-left)
+          (rename directional-collection-delete-left!
+                  flexible-sequence-delete-left!)
+          (rename directional-collection-delete-right
+                  flexible-sequence-delete-right)
+          (rename directional-collection-delete-right!
+                  flexible-sequence-delete-right!)
+          (rename directional-collection-insert-left
+                  flexible-sequence-insert-left)
+          (rename directional-collection-insert-left!
+                  flexible-sequence-insert-left!)
+          (rename sequence-fold-keys-left flexible-sequence-fold-keys-left)
+          (rename sequence-fold-keys-left flexible-sequence-fold-keys-right)
+          (rename sequence-insert-right flexible-sequence-insert-right)
+          (rename sequence-insert-right! flexible-sequence-insert-right!)
+
+          limited-collection?
+
+          list?
+          make-list
+          list
+          (rename bag-add list-add)
+          (rename bag-add! list-add!)
+          (rename bag-add-from list-add-from)
+          (rename bag-add-from! list-add-from!)
+          (rename bag-contains? list-contains?)
+          (rename bag-count list-count)
+          (rename bag-delete list-delete)
+          (rename bag-delete! list-delete!)
+          (rename bag-delete-all list-delete-all)
+          (rename bag-delete-all! list-delete-all!)
+          (rename bag-delete-all-from list-delete-all-from)
+          (rename bag-delete-all-from! list-delete-all-from!)
+          (rename bag-delete-from list-delete-from)
+          (rename bag-delete-from! list-delete-from!)
+          (rename bag-equivalence-function list-equivalence-function)
+          (rename collection->list list->list)
+          (rename collection-clear list-clear)
+          (rename collection-clear! list-clear!)
+          (rename collection-copy list-copy)
+          (rename collection-empty? list-empty?)
+          (rename collection-fold-left list-fold-left)
+          (rename collection-fold-right list-fold-right)
+          (rename collection-get-any list-get-any)
+          (rename collection-size list-size)
+          (rename collection= list=)
+          (rename directional-collection-delete-left list-delete-left)
+          (rename directional-collection-delete-left! list-delete-left!)
+          (rename directional-collection-delete-right list-delete-right)
+          (rename directional-collection-delete-right! list-delete-right!)
+          (rename directional-collection-get-left list-get-left)
+          (rename directional-collection-get-right list-get-right)
+          (rename directional-collection-insert-left list-insert-left)
+          (rename directional-collection-insert-left! list-insert-left!)
+          (rename flexible-sequence-delete-at list-delete-at)
+          (rename flexible-sequence-delete-at! list-delete-at!)
+          (rename flexible-sequence-insert list-insert)
+          (rename flexible-sequence-insert! list-insert!)
+          (rename sequence-insert-right list-insert-right)
+          (rename sequence-insert-right! list-insert-right!)
+          (rename sequence-ref list-ref)
+          (rename sequence-replace-from list-replace-from)
+          (rename sequence-replace-from! list-replace-from!)
+          (rename sequence-set list-set)
+          (rename sequence-set! list-set!)
+
+          map?
+          map
+          make-map
+          map-add-from
+          map-add-from!
+          map-contains-key?
+          map-count
+          map-delete
+          map-delete!
+          map-delete-from
+          map-delete-from!
+          map-equivalence-function
+          map-fold-keys-left
+          map-fold-keys-right
+          map-get
+          map-key-equivalence-function
+          map-keys->list
+          map-put
+          map-put!
+          map-update
+          map-update!
+          (rename collection->list map->list)
+          (rename collection->list map->list)
+          (rename collection-clear! map-clear!)
+          (rename collection-copy map-copy)
+          (rename collection-empty? map-empty?)
+          (rename collection-fold-left map-fold-left)
+          (rename collection-fold-right map-fold-right)
+          (rename collection-get-any map-get-any)
+          (rename collection-size map-size)
+          (rename collection= map=)
+          (rename collection-clear map-clear)
+
+          ordered-collection?
+          make-ordered-collection
+          ordered-collection-ordering-function
+          ordered-collection-get-left
+          ordered-collection-get-right
+          ordered-collection-delete-left
+          ordered-collection-delete-left!
+          ordered-collection-delete-right
+          ordered-collection-delete-right!
+
+          purely-mutable-collection?
+
+          sequence?
+          make-sequence
+          sequence
+          sequence-fold-keys-left
+          sequence-fold-keys-right
+          sequence-insert-right
+          sequence-insert-right!
+          sequence-ref
+          sequence-replace-from
+          sequence-replace-from!
+          sequence-set
+          sequence-set!
+          (rename bag-add sequence-add)
+          (rename bag-add! sequence-add!)
+          (rename bag-count sequence-count)
+          (rename collection->list sequence->list)
+          (rename collection-clear sequence-clear)
+          (rename collection-clear! sequence-clear!)
+          (rename collection-copy sequence-copy)
+          (rename collection-empty? sequence-empty?)
+          (rename collection-fold-left sequence-fold-left)
+          (rename collection-fold-right sequence-fold-right)
+          (rename collection-get-any sequence-get-any)
+          (rename collection-size sequence-size)
+          (rename collection= sequence=)
+          (rename directional-collection-get-left sequence-get-left)
+          (rename directional-collection-get-right sequence-get-right)
+
+          make-set
+          set
+          set-add
+          set-add!
+          set-add-from
+          set-add-from!
+          set-contains?
+          set-count
+          set-delete
+          set-delete!
+          set-delete-from
+          set-delete-from!
+          set-difference
+          set-difference!
+          set-equivalence-function
+          set-intersection
+          set-intersection!
+          set-subset?
+          set-symmetric-difference
+          set-symmetric-difference!
+          set-union
+          set-union!
+          set?
+          (rename collection->list set->list)
+          (rename collection-clear set-clear)
+          (rename collection-clear! set-clear!)
+          (rename collection-copy set-copy)
+          (rename collection-empty? set-empty?)
+          (rename collection-fold-left set-fold-left)
+          (rename collection-fold-right set-fold-right)
+          (rename collection-get-any set-get-any)
+          (rename collection-size set-size)
+          (rename collection= set=)
+          ;; Won't work but are still exported for some reason.
+          (rename sequence-fold-keys-left set-fold-keys-left)
+          (rename sequence-fold-keys-right set-fold-keys-right)
+
+          string?
+          make-string
+          string
+          (rename bag-contains? string-contains?)
+          (rename bag-count string-count)
+          (rename bag-equivalence-function string-equivalence-function)
+          (rename collection->list string->list)
+          (rename collection-copy string-copy)
+          (rename collection-empty? string-empty?)
+          (rename collection-fold-left string-fold-left)
+          (rename collection-fold-right string-fold-right)
+          (rename collection-get-any string-get-any)
+          (rename collection-size string-size)
+          (rename collection= string=)
+          (rename directional-collection-get-left string-get-left)
+          (rename directional-collection-get-right string-get-right)
+          (rename sequence-ref string-ref)
+          (rename sequence-replace-from string-replace-from)
+          (rename sequence-replace-from! string-replace-from!)
+          (rename sequence-set string-set)
+          (rename sequence-set! string-set!)
+
+          make-vector
+          vector
+          vector?
+          (rename bag-contains? vector-contains?)
+          (rename bag-count vector-count)
+          (rename bag-equivalence-function vector-equivalence-function)
+          (rename collection->list vector->list)
+          (rename collection-copy vector-copy)
+          (rename collection-empty? vector-empty?)
+          (rename collection-fold-left vector-fold-left)
+          (rename collection-fold-right vector-fold-right)
+          (rename collection-get-any vector-get-any)
+          (rename collection-size vector-size)
+          (rename collection= vector=)
+          (rename directional-collection-get-left vector-get-left)
+          (rename directional-collection-get-right vector-get-right)
+          (rename sequence-ref vector-ref)
+          (rename sequence-replace-from vector-replace-from)
+          (rename sequence-replace-from! vector-replace-from!)
+          (rename sequence-set vector-set)
+          (rename sequence-set! vector-set!)
+     )
+  ;; These are the minimal set of identifiers that are actually defined.
+  #| (export
+
+   ;; Collection (base class)
+   collection? collection-name make-collection
+   collection-size
+   collection-get-any collection-empty? collection->list
+   collection-clear collection-clear! collection=
+   collection collection-copy collection-fold-left collection-fold-right
+
+   ;; Limited collection (collection property)
+   limited-collection?
+
+   ;; Purely mutable collection (collection property)
+   purely-mutable-collection?
+
+   ;; Ordered collections (collection property)
+   ordered-collection? make-ordered-collection
+   ordered-collection-ordering-function
+   ordered-collection-get-left ordered-collection-get-right
+   ordered-collection-delete-left ordered-collection-delete-right
+   ordered-collection-delete-left! ordered-collection-delete-right!
+
+   ;; Directional collection (collection property)
+   directional-collection?
+   directional-collection-get-left directional-collection-get-right
+   directional-collection-insert-left directional-collection-insert-right
+   directional-collection-insert-left! directional-collection-insert-right!
+   directional-collection-delete-left directional-collection-delete-right
+   directional-collection-delete-left! directional-collection-delete-right!
+
+   ;; Bag (inherit collection)
+   bag? make-bag bag bag-equivalence-function
+   bag-count bag-contains? bag-add bag-add!
+   bag-delete bag-delete! bag-delete-all bag-delete-all!
+   bag-add-from bag-add-from! bag-delete-from bag-delete-from!
+   bag-delete-all-from bag-delete-all-from!
+
+   ;; Set (inherit collection)
+   set? make-set set set-equivalence-function set-contains? set-subset?
+   set-add set-add! set-delete set-delete! set-union set-union!
+   set-intersection set-intersection! set-difference set-difference!
+   set-symmetric-difference set-symmetric-difference!
+   set-add-from set-add-from! set-delete-from set-delete-from!
+   set-count
+
+   ;; Map (inherit collection)
+   map? make-map map map-equivalence-function map-key-equivalence-function
+   map-contains-key? map-keys->list map-get map-put map-put!
+   map-update map-update! map-delete map-delete!
+   map-delete-from map-delete-from! map-add-from map-add-from!
+   map-fold-keys-left map-fold-keys-right
+   map-count
+
+   ;; Sequence (inherit bag)
+   sequence? make-sequence sequence
+   sequence-ref
+   sequence-insert-right sequence-insert-right!
+   sequence-set sequence-set! sequence-replace-from sequence-replace-from!
+   sequence-fold-keys-left sequence-fold-keys-right
+
+   ;; Flexible sequence (inherit sequence)
+   flexible-sequence? make-flexible-sequence flexible-sequence
+   flexible-sequence-insert flexible-sequence-insert!
+   flexible-sequence-delete-at flexible-sequence-delete-at!
+
+   ;; Vector (inherit sequence)
+   vector? make-vector vector
+
+   ;; List (inherit flexible-sequence)
+   list? make-list list
+
+   ;; String (inherit sequence)
+   string? make-string string
+
+   ;; alist-map (inherit map)
+  alist-map? make-alist-map alist-map) |#
 )
