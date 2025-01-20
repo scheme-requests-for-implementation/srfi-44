@@ -400,6 +400,7 @@
         (values col big)))
 
     ;; Bag (inherit collection)
+
     (define-record-type (<bag> <collection>)
       (mk-bag col equiv)
       bag?
