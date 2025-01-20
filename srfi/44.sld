@@ -9,7 +9,6 @@
 ;; The sample implementation is complicated and also incomplete (doesn't parse).
 ;; This version uses lists and records with inheritance.
 ;; It also minimizes the amount of exported identifiers by dispatching.
-;; The full set of aliased exports are commented out at the end.
 ;; By design, some of the full set of aliases are invalid for certain types.
 
 ;; Uncertainties in the specification:
