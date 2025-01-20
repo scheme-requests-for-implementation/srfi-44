@@ -11,10 +11,6 @@
         (srfi 64))
 (import (scheme write))
 
-;; FIXME: A lot of these tests are relatively trivial sanity checks.
-;; FIXME: This would probably be better organized into a more imperative style
-;; using define.
-
 (test-begin "SRFI-44")
 
 (test-group "collection"
@@ -34,11 +30,12 @@
     (test-assert "constructor" (collection? (collection 1 2 3)))
     (let ((col2 (collection 1 2 3)))
       (test-assert "copy" (collection= = (collection-copy col2) col2)))
-    (test-assert "fold-left" (= 2 (collection-fold-left
-                                   (collection 3 2 1)
-                                   (lambda (x acc)
-                                     (values #t (- acc x)))
-                                   0)))
+    (test-assert "fold-left" (equal? '(3 2 1)
+                                     (collection-fold-left
+                                      (collection 1 2 3)
+                                      (lambda (x acc)
+                                        (values #t (cons x acc)))
+                                      '())))
     (test-assert "fold-right" (= -6 (collection-fold-right
                                      (collection 3 2 1)
                                      (lambda (x acc)
@@ -73,20 +70,23 @@
     (test-assert "get-left" (= 1 (ordered-collection-get-left ocol)))
     (test-assert "get-right" (= 3 (ordered-collection-get-right ocol)))
     (receive (rest l) (ordered-collection-delete-left ocol)
-      (test-assert "delete-left" (= 1 l))
-      (let ((ocol2 (make-ordered-collection list-ordering-func)))
-        (sequence-insert-right! ocol2 2)
-        (sequence-insert-right! ocol2 3)
-        (test-assert "equality" (collection= = ocol ocol2))))
+      (test-assert "delete-left" (= 1 l)))
+    (let ((ocol2 (make-ordered-collection list-ordering-func)))
+      (sequence-insert-right! ocol2 1)
+      (sequence-insert-right! ocol2 2)
+      (sequence-insert-right! ocol2 3)
+      (test-assert "equality" (collection= = ocol ocol2)))
     (let ((my-list (make-ordered-collection list-ordering-func)))
       (sequence-insert-right! my-list 1)
-      (receive (_ l) (ordered-collection-delete-left! my-list)
-        (test-assert "delete-left!" (collection-empty? my-list))))
+      (sequence-insert-right! my-list 2)
+      (receive (c v) (ordered-collection-delete-left! my-list)
+        (test-assert "delete-left! (value)" (= v 1))
+        (test-assert "delete-left!" (collection= = (sequence 1 2) my-list))))
     (let ((my-list (make-ordered-collection list-ordering-func)))
       (sequence-insert-right! my-list 1)
       (receive (rest r) (ordered-collection-delete-right my-list)
-        (test-assert "delete-right" (= 3 r))
-        (test-assert "delete-right" (collection-empty? rest))))
+        (test-assert "delete-right (value)" (= 1 r))
+        (test-assert "delete-right (collection)" (collection-empty? rest))))
     (let ((ocol2 (make-ordered-collection list-ordering-func)))
       (sequence-insert-right! ocol2 1)
       (receive (_ r) (ordered-collection-delete-right! ocol2)
@@ -176,7 +176,7 @@
   (test-assert "equiv-func accessor"
                (procedure? (set-equivalence-function (set))))
   (test-assert "contains?" (set-contains? (set 1 2 3) 2))
-  (test-assert "subset?" (set-subset? (set 1 2 3) (set 1) (set 2) (set 2 3)))
+  (test-assert "subset?" (set-subset? (set 1 2) (set 1 2) (set 1 2 3)))
   (test-assert "add" (collection= = (set-add (set 2 3) 1) (set 3 2 1)))
   (let ((s (set 2 3)))
     (set-add! s 1)
@@ -238,9 +238,9 @@
     (map-put! m 'a 2)
     (test-assert "put!" (collection= equal? (map (cons 'a 2)) m)))
   #;(test-assert "update" (collection=
-                         = (map-update (map (cons 'a 0))
-                                       'a (lambda (x) (+ x 1)))
-                         (map (cons 'a 1))))
+  = (map-update (map (cons 'a 0))
+  'a (lambda (x) (+ x 1)))
+  (map (cons 'a 1))))
   (let ((m (map (cons 'a 1))))
     (map-update! m 'a (lambda (x) (+ x 1)))
     (test-assert "update!" (collection= equal? (map (cons 'a 2)) m)))
@@ -265,15 +265,15 @@
     (test-assert "add-from!" (collection= equal?
                                           (map (cons 'a 1) (cons 'b 2)) m)))
   (test-assert "fold-keys-left"
-               (= 1 (map-fold-keys-left (map (cons 'a 1) (cons 'b 2))
-                                        (lambda (key val acc)
-                                          (values #t (- acc val)))
-                                        0)))
+               (equal? '(b a) (map-fold-keys-left (map (cons 'a 1) (cons 'b 2))
+                                                  (lambda (key val acc)
+                                                    (values #t (cons key acc)))
+                                                  '())))
   (test-assert "fold-keys-right"
-               (= -3 (map-fold-keys-left (map (cons 'a 1) (cons 'b 2))
-                                         (lambda (key val acc)
-                                           (values #t (- acc val)))
-                                         0))))
+               (equal? '(a b) (map-fold-keys-right (map (cons 'a 1) (cons 'b 2))
+                                                   (lambda (key val acc)
+                                                     (values #t (cons key acc)))
+                                                   '()))))
 
 (test-group "sequence"
   (test-assert "predicate" (sequence? (make-sequence)))
@@ -300,15 +300,17 @@
     (sequence-replace-from! seq 1 (sequence 2 3))
     (test-assert "replace-from!" (collection= = (sequence 1 2 3) seq)))
   (test-assert "fold-keys-left"
-               (= 1 (sequence-fold-keys-left (sequence 1 2 3)
-                                             (lambda (key val acc)
-                                               (values #t (- acc val)))
-                                             0)))
+               (equal? '(2 1 0) (sequence-fold-keys-left
+                                 (sequence 1 2 3)
+                                 (lambda (key val acc)
+                                   (values #t (cons key acc)))
+                                 '())))
   (test-assert "fold-keys-right"
-               (= -3 (sequence-fold-keys-left (sequence 1 2 3)
-                                              (lambda (key val acc)
-                                                (values #t (- acc key)))
-                                              0))))
+               (equal? '(0 1 2) (sequence-fold-keys-right
+                                 (sequence 1 2 3)
+                                 (lambda (key val acc)
+                                   (values #t (cons key acc)))
+                                 '()))))
 
 (test-group "flexible-sequence"
   (test-assert "predicate" (flexible-sequence? (make-flexible-sequence)))

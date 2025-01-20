@@ -8,8 +8,8 @@
 ;; This SRFI was finalized in an incomplete state.
 ;; The sample implementation is complicated and also incomplete (doesn't parse).
 ;; This version uses lists and records with inheritance.
-;; It also reduces the amount of exported identifiers by dispatching.
-;; If you want the full set of identifier aliases, they are exported at the end.
+;; It also minimized the amount of exported identifiers by dispatching.
+;; The full set of identifier alias exports are commented out at the end.
 ;; By design, some of the full set of aliases are invalid for certain sub-types.
 
 ;; Uncertainties in the specification:
@@ -302,6 +302,18 @@
     (define (ordered-collection-ordering-function col)
       (collection-ordering-function col))
 
+    (define ordered-collection-get-right
+      (case-lambda
+       ((col) (ordered-collection-get-right col (lambda _ #f)))
+       ((col thk)
+        (let ((f (collection-ordering-function col)))
+          (unless f
+            (error "Not an ordered collection" col))
+          (if (null? (collection-list col))
+              (thk)
+              (let ((lst (collection-list col)))
+                (f (collection-list col) (- (length lst) 1))))))))
+
     (define ordered-collection-get-left
       (case-lambda
        ((col) (ordered-collection-get-left col (lambda _ #f)))
@@ -313,18 +325,7 @@
               (thk)
               (f (collection-list col) 0))))))
 
-    (define ordered-collection-get-right
-      (case-lambda
-       ((col) (ordered-collection-get-right col (lambda _ #f)))
-       ((col thk)
-        (let ((f (collection-ordering-function col)))
-          (unless f
-            (error "Not an ordered collection" col))
-          (if (null? (collection-list col))
-              (thk)
-              (f (collection-list col) (- (collection-size col) 1)))))))
-
-    (define (ordered-collection-delete-left col)
+    (define (ordered-collection-delete-right col)
       (unless (collection-ordering-function col)
         (error "Not an ordered collection" col))
       (let* ((f (collection-ordering-function col))
@@ -334,7 +335,7 @@
                                 (iota (- (collection-size col) 1)))))
         (values ((get-constructor col) new-lst) small)))
 
-    (define (ordered-collection-delete-right col)
+    (define (ordered-collection-delete-left col)
       (unless (collection-ordering-function col)
         (error "Not an ordered collection" col))
       (let* ((f (collection-ordering-function col))
@@ -352,7 +353,7 @@
       (let* ((f (collection-ordering-function col))
              (small (f (collection-list col) 0))
              (new-lst (r7rs:map (lambda (x)
-                                  (f col x))
+                                  (f (collection-list col) x))
                                 (iota (- (collection-size col) 1) 1))))
         (collection-list-set! col new-lst)
         (values col small)))
@@ -586,7 +587,8 @@
      (mk-set (mk-collection 'set '() #f #f #f #f #f) equal?))
 
    (define (set . rest)
-     (mk-set (mk-collection 'set '() #f #f #f #f #f) equal?))
+     (mk-set (mk-collection 'set (delete-duplicates rest)
+                            #f #f #f #f #f) equal?))
 
    (define (set-contains? s val)
       (and (member val (collection-list s) (set-equivalence-function s))
@@ -701,7 +703,8 @@
      (mk-map (mk-collection 'map rest #f #f #f #f #f) equal? eqv?))
 
    (define (map-contains-key? m k)
-     (and (member k (collection-list m) (map-key-equivalence-function m))
+     (and (member k (r7rs:map car (collection-list m))
+                  (map-key-equivalence-function m))
           #t))
 
    (define (map-keys->list m)
@@ -925,8 +928,7 @@
       ((s i thk)
        (let ((lst (collection-list s)))
          (if (and (>= i 0) (< i (length lst)))
-             ;; Sequences insert on the right. Flip this so cons works.
-             (list-ref lst (- (length lst) 1 i))
+             (list-ref lst i)
              (thk))))))
 
    (define sequence-get-left
@@ -936,14 +938,14 @@
 
    (define sequence-get-right
      (case-lambda
-      ((s) (sequence-get-left s (lambda _ (error "Sequence empty" s))))
+      ((s) (sequence-get-right s (lambda _ (error "Sequence empty" s))))
       ((s thk) (sequence-ref s (- (collection-size s) 1) thk))))
 
    (define (sequence-insert-right s val)
-     ((get-constructor s) (cons val (collection-list s))))
+     ((get-constructor s) (append (collection-list s) (r7rs:list val))))
 
    (define (sequence-insert-right! s val)
-     (collection-list-set! s (cons val (collection-list s)))
+     (collection-list-set! s (append (collection-list s) (r7rs:list val)))
      s)
 
    (define (sequence-set s idx val)
@@ -1000,7 +1002,7 @@
      (apply list-fold-keys-left (collection-list col) func seed seeds))
 
    (define (sequence-fold-keys-right col func seed . seeds)
-     (apply list-fold-keys-right (collection-list col)) func seed seeds)
+     (apply list-fold-keys-right (collection-list col) func seed seeds))
 
    ;; Flexible sequence (inherit sequence)
 
@@ -1039,14 +1041,14 @@
      ((get-constructor fs)
       (let ((lst (collection-list fs)))
         (append (take lst idx)
-                (drop lst (max 0 (- idx 1)))))))
+                (drop lst (+ idx 1))))))
 
    (define (flexible-sequence-delete-at! fs idx)
      (collection-list-set!
       fs
       (let ((lst (collection-list fs)))
         (append (take lst idx)
-                (drop lst (max 0 (- idx 1))))))
+                (drop lst (+ idx 1)))))
      fs)
 
    ;; Vector (inherit sequence)
@@ -1077,8 +1079,9 @@
      (mk-list fseq)
      list?)
 
-   (define (make-list)
+   (define make-list
      (case-lambda
+      (() (make-list 0 #f))
       ((size) (make-list size #f))
       ((size default)
        (mk-list (mk-flexible-sequence
