@@ -189,25 +189,28 @@
       (ordering-function collection-ordering-function)
       (directional? collection-directional?))
 
+    (define (collection . rest)
+      (mk-collection 'collection rest #f #f #f #f #f))
+
     (define (make-collection)
       (mk-collection 'collection '() #f #f #f #f #f))
 
+    (define (collection->list col)
+      (collection-list col))
+
     (define (collection-size col)
-      (length (collection-list col)))
+      (length (collection->list col)))
 
     (define collection-get-any
       (case-lambda
        ((col) (collection-get-any col (lambda _ #f)))
        ((col absence-thunk)
-        (if (null? (collection-list col))
+        (if (null? (collection->list col))
             (absence-thunk)
-            (car (collection-list col))))))
+            (car (collection->list col))))))
 
     (define (collection-empty? col)
-      (null? (collection-list col)))
-
-    (define (collection->list col)
-      (collection-list col))
+      (null? (collection->list col)))
 
     (define (collection-clear col)
       ((get-constructor col) '()))
@@ -235,19 +238,16 @@
           (and (if (or (collection-ordering-function col)
                        (collection-directional? col))
                    ;; Ordered case
-                   (every equiv (collection-list col)
-                          (collection-list (car rest)))
+                   (every equiv (collection->list col)
+                          (collection->list (car rest)))
                    ;; Unordered case
                    (permutation? equiv
-                                 (collection-list col)
-                                 (collection-list (car rest))))
+                                 (collection->list col)
+                                 (collection->list (car rest))))
                (apply collection= equiv col (cdr rest)))))
 
-    (define (collection . rest)
-      (mk-collection 'collection rest #f #f #f #f #f))
-
     (define (collection-copy col)
-      ((get-constructor col) (list-copy (collection-list col))))
+      ((get-constructor col) (list-copy (collection->list col))))
 
     (define (collection-fold-left seq f . seeds)
       (let ((size (collection-size seq))
@@ -256,7 +256,7 @@
           (if (>= i size)
               (apply values seeds)
               (receive (proceed? . new-seeds)
-                  (apply f (list-ref (collection-list seq) i) seeds)
+                  (apply f (list-ref (collection->list seq) i) seeds)
                 (if (= (length new-seeds) seed-count)
                     (if proceed?
                         (loop new-seeds (+ i 1))
@@ -272,7 +272,7 @@
           (if (negative? i)
               (apply values seeds)
               (receive (proceed? . new-seeds)
-                  (apply f (list-ref (collection-list seq) i) seeds)
+                  (apply f (list-ref (collection->list seq) i) seeds)
                 (if (= (length new-seeds) seed-count)
                     (if proceed?
                         (loop new-seeds (- i 1))
@@ -309,10 +309,10 @@
         (let ((f (collection-ordering-function col)))
           (unless f
             (error "Not an ordered collection" col))
-          (if (null? (collection-list col))
+          (if (null? (collection->list col))
               (thk)
-              (let ((lst (collection-list col)))
-                (f (collection-list col) (- (length lst) 1))))))))
+              (let ((lst (collection->list col)))
+                (f (collection->list col) (- (length lst) 1))))))))
 
     (define ordered-collection-get-left
       (case-lambda
@@ -321,17 +321,17 @@
         (let ((f (collection-ordering-function col)))
           (unless f
             (error "Not an ordered collection" col))
-          (if (null? (collection-list col))
+          (if (null? (collection->list col))
               (thk)
-              (f (collection-list col) 0))))))
+              (f (collection->list col) 0))))))
 
     (define (ordered-collection-delete-right col)
       (unless (collection-ordering-function col)
         (error "Not an ordered collection" col))
       (let* ((f (collection-ordering-function col))
-             (small (f (collection-list col) 0))
+             (small (f (collection->list col) 0))
              (new-lst (r7rs:map (lambda (x)
-                                  (f (collection-list col) x))
+                                  (f (collection->list col) x))
                                 (iota (- (collection-size col) 1)))))
         (values ((get-constructor col) new-lst) small)))
 
@@ -339,10 +339,10 @@
       (unless (collection-ordering-function col)
         (error "Not an ordered collection" col))
       (let* ((f (collection-ordering-function col))
-             (big (f (collection-list col) (max 0 (- (collection-size col) 1))))
+             (big (f (collection->list col) 0))
              (new-lst (r7rs:map (lambda (x)
-                                  (f (collection-list col) x))
-                                (iota (max 0 (- (collection-size col) 2)) 0))))
+                                  (f (collection->list col) x))
+                                (iota (max 0 (- (collection-size col) 1)) 0))))
         (values ((get-constructor col) new-lst) big)))
 
     (define (ordered-collection-delete-left! col)
@@ -351,12 +351,12 @@
       (when (collection-immutable? col)
         (error "Collection immutable" col))
       (let* ((f (collection-ordering-function col))
-             (small (f (collection-list col) 0))
+             (big (f (collection->list col) 0))
              (new-lst (r7rs:map (lambda (x)
-                                  (f (collection-list col) x))
-                                (iota (- (collection-size col) 1) 1))))
+                                  (f (collection->list col) x))
+                                (iota (max 0 (- (collection-size col) 1)) 0))))
         (collection-list-set! col new-lst)
-        (values col small)))
+        (values col big)))
 
     (define (ordered-collection-delete-right! col)
       (unless (collection-ordering-function col)
@@ -364,7 +364,7 @@
       (when (collection-immutable? col)
         (error "Collection immutable" col))
       (let* ((f (collection-ordering-function col))
-             (big (f (collection-list col) (max 0 (- (collection-size col) 1))))
+             (big (f (collection->list col) (max 0 (- (collection-size col) 1))))
              (new-lst (r7rs:map (lambda (x)
                                   (f col x))
                                 (iota (max 0 (- (collection-size col) 2)) 0))))
@@ -384,9 +384,9 @@
        ((col thk)
         (unless (directional-collection? col)
           (error "Not a directional collection" col))
-        (if (null? (collection-list col))
+        (if (null? (collection->list col))
             (thk)
-            (directional-ordering-function (collection-list col) 0)))))
+            (directional-ordering-function (collection->list col) 0)))))
 
     (define directional-collection-get-right
       (case-lambda
@@ -394,27 +394,27 @@
        ((col thk)
         (unless (directional-collection? col)
           (error "Not a directional collection" col))
-        (if (null? (collection-list col))
+        (if (null? (collection->list col))
             (thk)
-            (directional-ordering-function (collection-list col)
+            (directional-ordering-function (collection->list col)
                                            (- (collection-size col) 1))))))
 
     (define (directional-collection-insert-left col val)
       (unless (collection-directional? col)
         (error "Not a directional collection" col))
-      ((get-constructor col) (cons val (collection-list col))))
+      ((get-constructor col) (cons val (collection->list col))))
 
     (define (directional-collection-insert-right col val)
       (unless (collection-directional? col)
         (error "Not a directional collection" col))
-      ((get-constructor col) (append (collection-list col) (r7rs:list val))))
+      ((get-constructor col) (append (collection->list col) (r7rs:list val))))
 
     (define (directional-collection-insert-left! col val)
       (unless (collection-directional? col)
         (error "Not a directional collection" col))
       (when (collection-immutable? col)
         (error "Collection is immutable" col))
-      (collection-list-set! col (cons val (collection-list col)))
+      (collection-list-set! col (cons val (collection->list col)))
       col)
 
     (define (directional-collection-insert-right! col val)
@@ -422,16 +422,16 @@
         (error "Not a directional collection" col))
       (when (collection-immutable? col)
         (error "Collection is immutable" col))
-      (collection-list-set! col (append (collection-list col) (r7rs:list val)))
+      (collection-list-set! col (append (collection->list col) (r7rs:list val)))
       col)
 
     (define (directional-collection-delete-left col)
       (unless (collection-directional? col)
         (error "Not a directional collection" col))
       (let* ((f directional-ordering-function)
-             (small (f (collection-list col) 0))
+             (small (f (collection->list col) 0))
              (new-lst (r7rs:map (lambda (x)
-                                  (f (collection-list col) x))
+                                  (f (collection->list col) x))
                                 (iota (- (collection-size col) 1) 1))))
         (values ((get-constructor col) new-lst) small)))
 
@@ -439,9 +439,9 @@
       (unless (collection-directional? col)
         (error "Not a directional collection" col))
       (let* ((f directional-ordering-function)
-             (big (f (collection-list col) (max 0 (- (collection-size col) 1))))
+             (big (f (collection->list col) (max 0 (- (collection-size col) 1))))
              (new-lst (r7rs:map (lambda (x)
-                                  (f (collection-list col) x))
+                                  (f (collection->list col) x))
                                 (iota (max 0 (- (collection-size col) 2)) 0))))
         (values ((get-constructor col) new-lst) big)))
 
@@ -451,10 +451,10 @@
       (when (collection-immutable? col)
         (error "Collection immutable" col))
       (let* ((f directional-ordering-function)
-             (small (f (collection-list col) 0))
+             (small (f (collection->list col) 0))
              (new-lst (r7rs:map (lambda (x)
-                                  (f (collection-list col) x))
-                           (iota (- (collection-size col) 1) 1 ))))
+                                  (f (collection->list col) x))
+                                (iota (- (collection-size col) 1) 1 ))))
         (collection-list-set! col new-lst)
         (values col small)))
 
@@ -464,9 +464,9 @@
       (when (collection-immutable? col)
         (error "Collection immutable" col))
       (let* ((f directional-ordering-function)
-             (big (f (collection-list col) (max 0 (- (collection-size col) 1))))
+             (big (f (collection->list col) (max 0 (- (collection-size col) 1))))
              (new-lst (r7rs:map (lambda (x)
-                                  (f (collection-list col) x))
+                                  (f (collection->list col) x))
                                 (iota (max 0 (- (collection-size col) 2)) 0))))
         (collection-list-set! col new-lst)
         (values col big)))
@@ -484,7 +484,7 @@
       (mk-bag (mk-collection 'bag rest #f #f #f #f #f) equal?))
 
     (define (bag-count b val)
-      (let ((lst (collection-list b))
+      (let ((lst (collection->list b))
             (equiv (bag-equivalence-function b)))
         (let loop ((out 0)
                    (lst lst))
@@ -495,14 +495,14 @@
                   (loop out (cdr lst)))))))
 
     (define (bag-contains? b val)
-      (and (member val (collection-list b) (bag-equivalence-function b))
+      (and (member val (collection->list b) (bag-equivalence-function b))
            #t))
 
     (define (bag-add b val)
-      ((get-constructor b) (cons val (collection-list b))))
+      ((get-constructor b) (cons val (collection->list b))))
 
     (define (bag-add! b val)
-      (collection-list-set! b (cons val (collection-list b)))
+      (collection-list-set! b (cons val (collection->list b)))
       b)
 
     (define (delete-one equiv val lst)
@@ -518,44 +518,44 @@
 
     (define (bag-delete b val)
       ((get-constructor b) (delete-one (bag-equivalence-function b) val
-                                       (collection-list b))))
+                                       (collection->list b))))
 
     (define (bag-delete! b val)
       (collection-list-set! b (delete-one (bag-equivalence-function b) val
-                                          (collection-list b)))
+                                          (collection->list b)))
       b)
 
     (define (bag-delete-all b val)
-      ((get-constructor b) (delete val (collection-list b)
+      ((get-constructor b) (delete val (collection->list b)
                                    (bag-equivalence-function b))))
 
     (define (bag-delete-all! b val)
-      (collection-list-set! b (delete val (collection-list b)
+      (collection-list-set! b (delete val (collection->list b)
                                       (bag-equivalence-function b)))
       b)
 
     (define (bag-add-from b b1)
-      ((get-constructor b) (append (collection-list b) (collection-list b1))))
+      ((get-constructor b) (append (collection->list b) (collection->list b1))))
 
     (define (bag-add-from! b b1)
-      (collection-list-set! b (append (collection-list b)
-                                      (collection-list b1)))
+      (collection-list-set! b (append (collection->list b)
+                                      (collection->list b1)))
       b)
 
     (define (bag-delete-from b b1)
       (let* ((bef (bag-equivalence-function b))
              (new (fold (lambda (x acc)
                           (delete-one bef x acc))
-                        (collection-list b)
-                        (collection-list b1))))
+                        (collection->list b)
+                        (collection->list b1))))
         ((get-constructor b) new)))
 
     (define (bag-delete-from! b b1)
       (let* ((bef (bag-equivalence-function b))
              (new (fold (lambda (x acc)
                           (delete-one bef x acc))
-                        (collection-list b)
-                        (collection-list b1))))
+                        (collection->list b)
+                        (collection->list b1))))
         (collection-list-set! b new)
         b))
 
@@ -563,585 +563,589 @@
       (let* ((bef (bag-equivalence-function b))
              (new (fold (lambda (x acc)
                           (delete x acc bef))
-                        (collection-list b)
-                        (collection-list b1))))
+                        (collection->list b)
+                        (collection->list b1))))
         ((get-constructor b) new)))
 
     (define (bag-delete-all-from! b b1)
       (let* ((bef (bag-equivalence-function b))
              (new (fold (lambda (x acc)
                           (delete x acc bef))
-                        (collection-list b)
-                        (collection-list b1))))
+                        (collection->list b)
+                        (collection->list b1))))
         (collection-list-set! b new)
         b))
 
-   ;; Set (inherit collection)
+    ;; Set (inherit collection)
 
-   (define-record-type (<set> <collection>)
-     (mk-set col equiv)
-     set?
-     (equiv set-equivalence-function))
+    (define-record-type (<set> <collection>)
+      (mk-set col equiv)
+      set?
+      (equiv set-equivalence-function))
 
-   (define (make-set)
-     (mk-set (mk-collection 'set '() #f #f #f #f #f) equal?))
+    (define (make-set)
+      (mk-set (mk-collection 'set '() #f #f #f #f #f) equal?))
 
-   (define (set . rest)
-     (mk-set (mk-collection 'set (delete-duplicates rest)
-                            #f #f #f #f #f) equal?))
+    (define (set . rest)
+      (mk-set (mk-collection 'set (delete-duplicates rest)
+                             #f #f #f #f #f) equal?))
 
-   (define (set-contains? s val)
-      (and (member val (collection-list s) (set-equivalence-function s))
+    (define (set-contains? s val)
+      (and (member val (collection->list s) (set-equivalence-function s))
            #t))
 
-   (define (set-subset? s . rest)
-     (if (null? rest)
-         #t
-         (and (lset<= (set-equivalence-function s) (collection-list s)
-                      (collection-list (car rest)))
-              (apply set-subset? s (cdr rest)))))
+    (define (set-subset? s . rest)
+      (if (null? rest)
+          #t
+          (and (lset<= (set-equivalence-function s) (collection->list s)
+                       (collection->list (car rest)))
+               (apply set-subset? s (cdr rest)))))
 
-   (define (set-add s val)
-     ((get-constructor s) (lset-adjoin (set-equivalence-function s)
-                                       (collection-list s) val)))
+    (define (set-add s val)
+      ((get-constructor s) (lset-adjoin (set-equivalence-function s)
+                                        (collection->list s) val)))
 
-   (define (set-add! s val)
-     (collection-list-set! s (lset-adjoin (set-equivalence-function s)
-                                          (collection-list s) val))
-     s)
+    (define (set-add! s val)
+      (collection-list-set! s (lset-adjoin (set-equivalence-function s)
+                                           (collection->list s) val))
+      s)
 
-   (define (set-delete s val)
-     ((get-constructor s) (delete-one (set-equivalence-function s)
-                                      val (collection-list s) )))
+    (define (set-delete s val)
+      ((get-constructor s) (delete-one (set-equivalence-function s)
+                                       val (collection->list s) )))
 
-   (define (set-delete! s val)
-     (collection-list-set! s (delete-one (set-equivalence-function s)
-                                         val (collection-list s)))
-     s)
+    (define (set-delete! s val)
+      (collection-list-set! s (delete-one (set-equivalence-function s)
+                                          val (collection->list s)))
+      s)
 
-   (define (set-union s . rest)
-     ((get-constructor s) (apply lset-union (set-equivalence-function s)
-                                 (collection-list s)
-                                 (r7rs:map collection-list rest))))
+    (define (set-union s . rest)
+      ((get-constructor s) (apply lset-union (set-equivalence-function s)
+                                  (collection->list s)
+                                  (r7rs:map collection->list rest))))
 
-   (define (set-union! s . rest)
-     (collection-list-set! s (apply lset-union (set-equivalence-function s)
-                                    (collection-list s)
-                                    (r7rs:map collection-list rest)))
-     s)
+    (define (set-union! s . rest)
+      (collection-list-set! s (apply lset-union (set-equivalence-function s)
+                                     (collection->list s)
+                                     (r7rs:map collection->list rest)))
+      s)
 
-   (define (set-intersection s . rest)
-     ((get-constructor s) (apply lset-intersection (set-equivalence-function s)
-                                 (collection-list s)
-                                 (r7rs:map collection-list rest))))
+    (define (set-intersection s . rest)
+      ((get-constructor s) (apply lset-intersection (set-equivalence-function s)
+                                  (collection->list s)
+                                  (r7rs:map collection->list rest))))
 
-   (define (set-intersection! s . rest)
-     (collection-list-set! s (apply lset-intersection
-                                    (set-equivalence-function s)
-                                    (collection-list s)
-                                    (r7rs:map collection-list rest)))
-     s)
+    (define (set-intersection! s . rest)
+      (collection-list-set! s (apply lset-intersection
+                                     (set-equivalence-function s)
+                                     (collection->list s)
+                                     (r7rs:map collection->list rest)))
+      s)
 
-   (define (set-difference s . rest)
-     ((get-constructor s) (apply lset-difference (set-equivalence-function s)
-                                 (collection-list s)
-                                 (r7rs:map collection-list rest))))
+    (define (set-difference s . rest)
+      ((get-constructor s) (apply lset-difference (set-equivalence-function s)
+                                  (collection->list s)
+                                  (r7rs:map collection->list rest))))
 
-   (define (set-difference! s . rest)
-     (collection-list-set! s (apply lset-difference (set-equivalence-function s)
-                                    (collection-list s)
-                                    (r7rs:map collection-list rest)))
-     s)
+    (define (set-difference! s . rest)
+      (collection-list-set! s (apply lset-difference (set-equivalence-function s)
+                                     (collection->list s)
+                                     (r7rs:map collection->list rest)))
+      s)
 
-   (define (set-symmetric-difference s s1)
-     ((get-constructor s) (lset-xor (set-equivalence-function s)
-                                    (collection-list s)
-                                    (collection-list s1))))
+    (define (set-symmetric-difference s s1)
+      ((get-constructor s) (lset-xor (set-equivalence-function s)
+                                     (collection->list s)
+                                     (collection->list s1))))
 
-   (define (set-symmetric-difference! s s1)
-     (collection-list-set! s (lset-xor (set-equivalence-function s)
-                                     (collection-list s)
-                                     (collection-list s1)))
-     s)
+    (define (set-symmetric-difference! s s1)
+      (collection-list-set! s (lset-xor (set-equivalence-function s)
+                                        (collection->list s)
+                                        (collection->list s1)))
+      s)
 
-   (define (set-add-from s b)
-     ((get-constructor s) (lset-union (set-equivalence-function s)
-                                      (collection-list s)
-                                      (collection-list b))))
+    (define (set-add-from s b)
+      ((get-constructor s) (lset-union (set-equivalence-function s)
+                                       (collection->list s)
+                                       (collection->list b))))
 
-   (define (set-add-from! s b)
-     (collection-list-set! s (lset-union (set-equivalence-function s)
-                                         (collection-list s)
-                                         (collection-list b)))
-     s)
+    (define (set-add-from! s b)
+      (collection-list-set! s (lset-union (set-equivalence-function s)
+                                          (collection->list s)
+                                          (collection->list b)))
+      s)
 
-   (define (set-delete-from s b)
-     ((get-constructor s) (lset-difference (set-equivalence-function s)
-                                           (collection-list s)
-                                           (collection-list b))))
+    (define (set-delete-from s b)
+      ((get-constructor s) (lset-difference (set-equivalence-function s)
+                                            (collection->list s)
+                                            (collection->list b))))
 
-   (define (set-delete-from! s b)
-     (collection-list-set! s (lset-difference (set-equivalence-function s)
-                                              (collection-list s)
-                                              (collection-list b)))
-     s)
+    (define (set-delete-from! s b)
+      (collection-list-set! s (lset-difference (set-equivalence-function s)
+                                               (collection->list s)
+                                               (collection->list b)))
+      s)
 
-   ;; Map (inherit collection)
+    ;; Map (inherit collection)
 
-   (define-record-type (<map> <collection>)
-     (mk-map col equiv key-equiv)
-     map?
-     (equiv map-equivalence-function)
-     (key-equiv map-key-equivalence-function))
+    (define-record-type (<map> <collection>)
+      (mk-map col equiv key-equiv)
+      map?
+      (equiv map-equivalence-function)
+      (key-equiv map-key-equivalence-function))
 
-   (define (make-map)
-     (mk-map (mk-collection 'map '() #f #f #f #f #f) equal? eqv?))
+    (define (make-map)
+      (mk-map (mk-collection 'map '() #f #f #f #f #f) equal? eqv?))
 
-   (define (map . rest)
-     (unless (every pair? rest)
-       (error "Map values must be pairs" rest))
-     (mk-map (mk-collection 'map rest #f #f #f #f #f) equal? eqv?))
+    (define (map . rest)
+      (unless (every pair? rest)
+        (error "Map values must be pairs" rest))
+      (mk-map (mk-collection 'map rest #f #f #f #f #f) equal? eqv?))
 
-   (define (map-contains-key? m k)
-     (and (member k (r7rs:map car (collection-list m))
-                  (map-key-equivalence-function m))
-          #t))
+    (define (map-contains-key? m k)
+      (and (member k (r7rs:map car (collection->list m))
+                   (map-key-equivalence-function m))
+           #t))
 
-   (define (map-keys->list m)
-     (r7rs:map car (collection-list m)))
+    (define (map-keys->list m)
+      (r7rs:map car (collection->list m)))
 
-   (define map-get
-     (case-lambda
-      ((m key) (map-get m key (lambda _ #f)))
-      ((m key thk)
-       (let ((pair (assoc key (collection-list m)
-                          (map-key-equivalence-function m))))
-         (if pair
-             (cdr pair)
-             (thk))))))
+    (define map-get
+      (case-lambda
+       ((m key) (map-get m key (lambda _ #f)))
+       ((m key thk)
+        (let ((pair (assoc key (collection->list m)
+                           (map-key-equivalence-function m))))
+          (if pair
+              (cdr pair)
+              (thk))))))
 
-   (define map-put
-     (case-lambda
-      ((m key val) (map-put m key val (lambda _ #f)))
-      ((m key val thk)
-       (let ((pair (assoc key (collection-list m)
-                          (map-key-equivalence-function m))))
-         (if pair
-             (values ((get-constructor m)
-                      (cons (cons key val) (collection-list m)))
-                     (cdr pair))
-             (values m (thk)))))))
+    (define map-put
+      (case-lambda
+       ((m key val) (map-put m key val (lambda _ #f)))
+       ((m key val thk)
+        (let ((pair (assoc key (collection->list m)
+                           (map-key-equivalence-function m))))
+          (if pair
+              (values ((get-constructor m)
+                       (cons (cons key val) (collection->list m)))
+                      (cdr pair))
+              (values m (thk)))))))
 
-   (define map-put!
-     (case-lambda
-      ((m key val) (map-put! m key val (lambda _ #f)))
-      ((m key val thk)
-       (let ((pair (assoc key (collection-list m)
-                          (map-key-equivalence-function m))))
-         (if pair
-             (begin (collection-list-set! m (cons (cons key val)
-                                                  (collection-list m)))
-                    (values m (cdr pair)))
-             (values m (thk)))))))
+    (define map-put!
+      (case-lambda
+       ((m key val) (map-put! m key val (lambda _ #f)))
+       ((m key val thk)
+        (let ((pair (assoc key (collection->list m)
+                           (map-key-equivalence-function m))))
+          (if pair
+              (begin (collection-list-set! m (cons (cons key val)
+                                                   (collection->list m)))
+                     (values m (cdr pair)))
+              (values m (thk)))))))
 
-   (define map-update
-     (case-lambda
-      ((m key func) (map-update key func (lambda _ #f)))
-      ((m key func thk)
-       (let ((pair (assoc key (collection-list m)
-                          (map-key-equivalence-function m))))
-         (if pair
-             (values ((get-constructor m)
-                      (cons (cons key (func (cdr pair))) (collection-list m)))
-                     (cdr pair))
-             (values m (thk)))))))
+    (define map-update
+      (case-lambda
+       ((m key func) (map-update key func (lambda _ #f)))
+       ((m key func thk)
+        (let ((pair (assoc key (collection->list m)
+                           (map-key-equivalence-function m))))
+          (if pair
+              (values ((get-constructor m)
+                       (cons (cons key (func (cdr pair))) (collection->list m)))
+                      (cdr pair))
+              (values m (thk)))))))
 
-   (define map-update!
-     (case-lambda
-      ((m key func) (map-update! m key func (lambda _ #f)))
-      ((m key func thk)
-       (let ((pair (assoc key (collection-list m)
-                          (map-key-equivalence-function m))))
-         (if pair
-             (begin (collection-list-set! m (cons (cons key (func (cdr pair)))
-                                                  (collection-list m)))
-                    (values m (cdr pair)))
-             (values m (thk)))))))
+    (define map-update!
+      (case-lambda
+       ((m key func) (map-update! m key func (lambda _ #f)))
+       ((m key func thk)
+        (let ((pair (assoc key (collection->list m)
+                           (map-key-equivalence-function m))))
+          (if pair
+              (begin (collection-list-set! m (cons (cons key (func (cdr pair)))
+                                                   (collection->list m)))
+                     (values m (cdr pair)))
+              (values m (thk)))))))
 
-   (define (map-delete m key)
-     ((get-constructor m)
-      (delete-one (lambda (x y)
-                    (let ((comp (map-key-equivalence-function m)))
-                      (comp (car x) (car y))))
-                  (cons key #f) (collection-list m))))
+    (define (map-delete m key)
+      ((get-constructor m)
+       (delete-one (lambda (x y)
+                     (let ((comp (map-key-equivalence-function m)))
+                       (comp (car x) (car y))))
+                   (cons key #f) (collection->list m))))
 
-   (define (map-delete! m key)
-     (collection-list-set!
-      m (delete-one (lambda (x y)
-                      (let ((comp (map-key-equivalence-function m)))
-                        (comp (car x) (car y))))
-                    (cons key #f) (collection-list m)))
-     m)
+    (define (map-delete! m key)
+      (collection-list-set!
+       m (delete-one (lambda (x y)
+                       (let ((comp (map-key-equivalence-function m)))
+                         (comp (car x) (car y))))
+                     (cons key #f) (collection->list m)))
+      m)
 
-   (define (map-delete-from m b)
-     (let* ((func (lambda (x y)
-                    ((map-key-equivalence-function m) x y)))
-            (new (fold (lambda (x acc)
-                         (delete-one func x acc))
-                       (collection-list m)
-                       (collection-list b))))
-       ((get-constructor b) new)))
+    (define (map-delete-from m b)
+      (let* ((func (lambda (x y)
+                     ((map-key-equivalence-function m) x y)))
+             (new (fold (lambda (x acc)
+                          (delete-one func x acc))
+                        (collection->list m)
+                        (collection->list b))))
+        ((get-constructor b) new)))
 
-   (define (map-delete-from! m b)
-     (let* ((func (lambda (x y)
-                    ((map-key-equivalence-function m) x (car y))))
-            (new (fold (lambda (x acc)
-                         (delete-one func x acc))
-                       (collection-list m)
-                       (collection-list b))))
-       (collection-list-set! m new)
-       m))
+    (define (map-delete-from! m b)
+      (let* ((func (lambda (x y)
+                     ((map-key-equivalence-function m) x (car y))))
+             (new (fold (lambda (x acc)
+                          (delete-one func x acc))
+                        (collection->list m)
+                        (collection->list b))))
+        (collection-list-set! m new)
+        m))
 
-   (define (map-add-from m m1)
-     ((get-constructor m) (append (collection-list m) (collection-list m1))))
+    (define (map-add-from m m1)
+      ((get-constructor m) (append (collection->list m)
+                                   (collection->list m1))))
 
-   (define (map-add-from! m m1)
-     (collection-list-set! m (append (collection-list m) (collection-list m1))))
+    (define (map-add-from! m m1)
+      (collection-list-set! m (append (collection->list m)
+                                      (collection->list m1))))
 
-   (define (list-case l k-nil k-pair)
-     (cond ((null? l)
-            (k-nil))
-           ((pair? l)
-            ;; Use CAR+CDR from SRFI 1, perhaps?
-            ;; (call-with-values (lambda () (car+cdr l)) k-pair)
-            (k-pair (car l) (cdr l)))
-           (else
-            (error "Not a list" l))))
+    (define (list-case l k-nil k-pair)
+      (cond ((null? l)
+             (k-nil))
+            ((pair? l)
+             ;; Use CAR+CDR from SRFI 1, perhaps?
+             ;; (call-with-values (lambda () (car+cdr l)) k-pair)
+             (k-pair (car l) (cdr l)))
+            (else
+             (error "Not a list" l))))
 
-   (define (list-fold-keys-left lst kons . knils)
-     (let ((knil-count (length knils)))
-       (let loop ((knils knils) (lst lst) (k 0))
-         (list-case lst
-                    (lambda () (apply values knils))
-                    (lambda (elt1 elt2+)
-                      (receive (proceed? . new-knils)
-                          (apply kons k elt1 knils)
-                        (cond ((not (= (length new-knils) knil-count))
-                               (error "Wrong number of knils"
-                                      list-fold-keys-left
-                                      `(expected ,knil-count)
-                                      `(got ,new-knils)))
-                              (proceed?
-                               (loop new-knils elt2+ (+ k 1)))
-                              (else
-                               (apply values new-knils)))))))))
+    (define (list-fold-keys-left lst kons . knils)
+      (let ((knil-count (length knils)))
+        (let loop ((knils knils) (lst lst) (k 0))
+          (list-case lst
+                     (lambda () (apply values knils))
+                     (lambda (elt1 elt2+)
+                       (receive (proceed? . new-knils)
+                           (apply kons k elt1 knils)
+                         (cond ((not (= (length new-knils) knil-count))
+                                (error "Wrong number of knils"
+                                       list-fold-keys-left
+                                       `(expected ,knil-count)
+                                       `(got ,new-knils)))
+                               (proceed?
+                                (loop new-knils elt2+ (+ k 1)))
+                               (else
+                                (apply values new-knils)))))))))
 
-   (define (list-fold-keys-right lst kons . knils)
-     (let ((knil-count (length knils)))
-       (call-with-values
-           (lambda ()
-             (let recur ((knils knils) (lst lst) (k 0))
-               (list-case lst
-                          (lambda () (apply values #t knils))
-                          (lambda (elt1 elt2+)
-                            (receive (proceed? . new-knils)
-                                (recur knils elt2+ (+ k 1))
-                              (cond ((not (= (length new-knils) knil-count))
-                                     (error "Wrong number of knils"
-                                            list-fold-keys-right
-                                            `(expected ,knil-count)
-                                            `(got ,new-knils)))
-                                    (proceed?
-                                     (apply kons k elt1 new-knils))
-                                    (else
-                                     (apply values #f new-knils))))))))
-         (lambda (_proceed? . vals)
-           (apply values vals)))))
+    (define (list-fold-keys-right lst kons . knils)
+      (let ((knil-count (length knils)))
+        (call-with-values
+            (lambda ()
+              (let recur ((knils knils) (lst lst) (k 0))
+                (list-case lst
+                           (lambda () (apply values #t knils))
+                           (lambda (elt1 elt2+)
+                             (receive (proceed? . new-knils)
+                                 (recur knils elt2+ (+ k 1))
+                               (cond ((not (= (length new-knils) knil-count))
+                                      (error "Wrong number of knils"
+                                             list-fold-keys-right
+                                             `(expected ,knil-count)
+                                             `(got ,new-knils)))
+                                     (proceed?
+                                      (apply kons k elt1 new-knils))
+                                     (else
+                                      (apply values #f new-knils))))))))
+          (lambda (_proceed? . vals)
+            (apply values vals)))))
 
-   (define (_map-fold-keys-left lst kons . knils)
-     (let ((knil-count (length knils)))
-       (let loop ((knils knils) (lst lst) (k 0))
-         (list-case lst
-                    (lambda () (apply values knils))
-                    (lambda (elt1 elt2+)
-                      (receive (proceed? . new-knils)
-                          (apply kons (car elt1) (cdr elt1) knils)
-                        (cond ((not (= (length new-knils) knil-count))
-                               (error "Wrong number of knils"
-                                      _map-fold-keys-left
-                                      `(expected ,knil-count)
-                                      `(got ,new-knils)))
-                              (proceed?
-                               (loop new-knils elt2+ (+ k 1)))
-                              (else
-                               (apply values new-knils)))))))))
+    (define (_map-fold-keys-left lst kons . knils)
+      (let ((knil-count (length knils)))
+        (let loop ((knils knils) (lst lst) (k 0))
+          (list-case lst
+                     (lambda () (apply values knils))
+                     (lambda (elt1 elt2+)
+                       (receive (proceed? . new-knils)
+                           (apply kons (car elt1) (cdr elt1) knils)
+                         (cond ((not (= (length new-knils) knil-count))
+                                (error "Wrong number of knils"
+                                       _map-fold-keys-left
+                                       `(expected ,knil-count)
+                                       `(got ,new-knils)))
+                               (proceed?
+                                (loop new-knils elt2+ (+ k 1)))
+                               (else
+                                (apply values new-knils)))))))))
 
-   (define (_map-fold-keys-right lst kons . knils)
-     (let ((knil-count (length knils)))
-       (call-with-values
-           (lambda ()
-             (let recur ((knils knils) (lst lst) (k 0))
-               (list-case lst
-                          (lambda () (apply values #t knils))
-                          (lambda (elt1 elt2+)
-                            (receive (proceed? . new-knils)
-                                (recur knils elt2+ (+ k 1))
-                              (cond ((not (= (length new-knils) knil-count))
-                                     (error "Wrong number of knils"
-                                            _map-fold-keys-right
-                                            `(expected ,knil-count)
-                                            `(got ,new-knils)))
-                                    (proceed?
-                                     (apply kons (car elt1) (cdr elt1)
-                                            new-knils))
-                                    (else
-                                     (apply values #f new-knils))))))))
-         (lambda (_proceed? . vals)
-           (apply values vals)))))
+    (define (_map-fold-keys-right lst kons . knils)
+      (let ((knil-count (length knils)))
+        (call-with-values
+            (lambda ()
+              (let recur ((knils knils) (lst lst) (k 0))
+                (list-case lst
+                           (lambda () (apply values #t knils))
+                           (lambda (elt1 elt2+)
+                             (receive (proceed? . new-knils)
+                                 (recur knils elt2+ (+ k 1))
+                               (cond ((not (= (length new-knils) knil-count))
+                                      (error "Wrong number of knils"
+                                             _map-fold-keys-right
+                                             `(expected ,knil-count)
+                                             `(got ,new-knils)))
+                                     (proceed?
+                                      (apply kons (car elt1) (cdr elt1)
+                                             new-knils))
+                                     (else
+                                      (apply values #f new-knils))))))))
+          (lambda (_proceed? . vals)
+            (apply values vals)))))
 
-   (define (map-fold-keys-left m func seed . seeds)
-     (apply _map-fold-keys-left (collection-list m) func seed seeds))
+    (define (map-fold-keys-left m func seed . seeds)
+      (apply _map-fold-keys-left (collection->list m) func seed seeds))
 
-   (define (map-fold-keys-right m func seed . seeds)
-     (apply _map-fold-keys-right (collection-list m) func seed seeds))
+    (define (map-fold-keys-right m func seed . seeds)
+      (apply _map-fold-keys-right (collection->list m) func seed seeds))
 
-   ;; Sequence (inherit bag)
+    ;; Sequence (inherit bag)
 
-   (define-record-type (<sequence> <bag>)
-     (mk-sequence b)
-     sequence?)
+    (define-record-type (<sequence> <bag>)
+      (mk-sequence b)
+      sequence?)
 
-   (define (make-sequence)
-     (mk-sequence (mk-bag (mk-collection 'sequence '()
-                                         #f #f #f #f #t)
-                          equal?)))
-
-   (define (sequence . rest)
-     (mk-sequence (mk-bag (mk-collection 'sequence rest
-                                         #f #f #f #f #t)
-                          equal?)))
-
-   (define sequence-ref
-     (case-lambda
-      ((s i) (sequence-ref s i (lambda _
-                                 (error "Sequence index of range" s i))))
-      ((s i thk)
-       (let ((lst (collection-list s)))
-         (if (and (>= i 0) (< i (length lst)))
-             (list-ref lst i)
-             (thk))))))
-
-   (define sequence-get-left
-     (case-lambda
-      ((s) (sequence-get-left s (lambda _ (error "Sequence empty" s))))
-      ((s thk) (sequence-ref s 0 thk))))
-
-   (define sequence-get-right
-     (case-lambda
-      ((s) (sequence-get-right s (lambda _ (error "Sequence empty" s))))
-      ((s thk) (sequence-ref s (- (collection-size s) 1) thk))))
-
-   (define (sequence-insert-right s val)
-     ((get-constructor s) (append (collection-list s) (r7rs:list val))))
-
-   (define (sequence-insert-right! s val)
-     (collection-list-set! s (append (collection-list s) (r7rs:list val)))
-     s)
-
-   (define (sequence-set s idx val)
-     (let ((lst (collection-list s)))
-       ((get-constructor s) (append (take lst idx)
-                                    (r7rs:list val)
-                                    (drop lst (+ idx 1))))))
-
-   (define (sequence-set! s idx val)
-     (let ((lst (collection-list s)))
-       (collection-list-set! s (append (take lst idx)
-                                       (r7rs:list val)
-                                       (drop lst (+ idx 1)))))
-     s)
-
-   (define sequence-replace-from
-     (case-lambda
-      ((s dest-start source-sequence)
-       (sequence-replace-from s dest-start source-sequence 0
-                              (collection-size source-sequence)))
-      ((s dest-start source-sequence source-start)
-       (sequence-replace-from s dest-start source-sequence source-start
-                              (collection-size source-sequence)))
-      ((s dest-start source-sequence source-start source-end)
-       (let* ((lst (collection-list s))
-              (l (- (length lst) 1))
-              (start (take lst dest-start))
-              (middle (drop (take lst (min l source-end)) source-start)))
-         ((get-constructor s) (append start middle
-                                      (drop lst (- (length lst)
-                                                   (+ (length start)
-                                                      (length middle))))))))))
-
-   (define sequence-replace-from!
-     (case-lambda
-      ((s dest-start source-sequence)
-       (sequence-replace-from! s dest-start source-sequence 0
-                               (collection-size source-sequence)))
-      ((s dest-start source-sequence source-start)
-       (sequence-replace-from! s dest-start source-sequence source-start
-                               (collection-size source-sequence)))
-      ((s dest-start source-sequence source-start source-end)
-       (let* ((lst (collection-list s))
-              (l (- (length lst) 1))
-              (start (take lst dest-start))
-              (middle (drop (take lst (min l source-end)) source-start)))
-         (collection-list-set!
-          s (append start middle
-                    (drop lst (- (length lst)
-                                 (+ (length start)
-                                    (length middle))))))))))
-
-   (define (sequence-fold-keys-left col func seed . seeds)
-     (apply list-fold-keys-left (collection-list col) func seed seeds))
-
-   (define (sequence-fold-keys-right col func seed . seeds)
-     (apply list-fold-keys-right (collection-list col) func seed seeds))
-
-   ;; Flexible sequence (inherit sequence)
-
-   (define-record-type (<flexible-sequence> <sequence>)
-     (mk-flexible-sequence seq)
-     flexible-sequence?)
-
-   (define (make-flexible-sequence)
-     (mk-flexible-sequence
-      (mk-sequence (mk-bag (mk-collection 'flexible-sequence '()
+    (define (make-sequence)
+      (mk-sequence (mk-bag (mk-collection 'sequence '()
                                           #f #f #f #f #t)
-                           equal?))))
+                           equal?)))
 
-   (define (flexible-sequence . rest)
-     (mk-flexible-sequence
-      (mk-sequence (mk-bag (mk-collection 'flexible-sequence rest
+    (define (sequence . rest)
+      (mk-sequence (mk-bag (mk-collection 'sequence rest
                                           #f #f #f #f #t)
-                           equal?))))
+                           equal?)))
 
-   (define (flexible-sequence-insert fs idx val)
-     ((get-constructor fs)
-      (let ((lst (collection-list fs)))
-        (append (take lst idx)
-                (r7rs:list val)
-                (drop lst idx)))))
+    (define sequence-ref
+      (case-lambda
+       ((s i) (sequence-ref s i (lambda _
+                                  (error "Sequence index of range" s i))))
+       ((s i thk)
+        (let ((lst (collection->list s)))
+          (if (and (>= i 0) (< i (length lst)))
+              (list-ref lst i)
+              (thk))))))
 
-   (define (flexible-sequence-insert! fs idx val)
-     (collection-list-set!
-      fs
-      (let ((lst (collection-list fs)))
-        (append (take lst idx)
-                (r7rs:list val)
-                (drop lst idx)))))
+    (define sequence-get-left
+      (case-lambda
+       ((s) (sequence-get-left s (lambda _ (error "Sequence empty" s))))
+       ((s thk) (sequence-ref s 0 thk))))
 
-   (define (flexible-sequence-delete-at fs idx)
-     ((get-constructor fs)
-      (let ((lst (collection-list fs)))
-        (append (take lst idx)
-                (drop lst (+ idx 1))))))
+    (define sequence-get-right
+      (case-lambda
+       ((s) (sequence-get-right s (lambda _ (error "Sequence empty" s))))
+       ((s thk) (sequence-ref s (- (collection-size s) 1) thk))))
 
-   (define (flexible-sequence-delete-at! fs idx)
-     (collection-list-set!
-      fs
-      (let ((lst (collection-list fs)))
-        (append (take lst idx)
-                (drop lst (+ idx 1)))))
-     fs)
+    (define (sequence-insert-right s val)
+      ((get-constructor s) (append (collection->list s) (r7rs:list val))))
 
-   ;; Vector (inherit sequence)
+    (define (sequence-insert-right! s val)
+      (collection-list-set! s (append (collection->list s) (r7rs:list val)))
+      s)
 
-   (define-record-type (<vector> <sequence>)
-     (mk-vector seq)
-     vector?)
+    (define (sequence-set s idx val)
+      (let ((lst (collection->list s)))
+        ((get-constructor s) (append (take lst idx)
+                                     (r7rs:list val)
+                                     (drop lst (+ idx 1))))))
 
-   (define make-vector
-     (case-lambda
-      ((size) (make-vector size #f))
-      ((size default)
-       (mk-vector (mk-sequence (mk-bag (mk-collection 'vector
-                                                      (r7rs:map (lambda _
-                                                                  default)
-                                                                (iota size))
-                                                      #t #f #t #f #f)
-                                       equal?))))))
+    (define (sequence-set! s idx val)
+      (let ((lst (collection->list s)))
+        (collection-list-set! s (append (take lst idx)
+                                        (r7rs:list val)
+                                        (drop lst (+ idx 1)))))
+      s)
 
-   (define (vector . rest)
-     (mk-vector (mk-sequence (mk-bag (mk-collection 'vector rest
-                                                    #t #f #t #f #f)
-                                     equal?))))
+    (define sequence-replace-from
+      (case-lambda
+       ((s dest-start source-sequence)
+        (sequence-replace-from s dest-start source-sequence 0
+                               (collection-size source-sequence)))
+       ((s dest-start source-sequence source-start)
+        (sequence-replace-from s dest-start source-sequence source-start
+                               (collection-size source-sequence)))
+       ((s dest-start source-sequence source-start source-end)
+        (let* ((lst (collection->list s))
+               (src (collection->list source-sequence))
+               (l (- (length lst) 1))
+               (start (take lst dest-start))
+               (middle (drop (take src (min l source-end)) source-start)))
+          ((get-constructor s) (append start middle
+                                       (drop lst (- (length lst)
+                                                    (+ (length start)
+                                                       (length middle))))))))))
 
-   ;; List (inherit flexible sequence)
+    (define sequence-replace-from!
+      (case-lambda
+       ((s dest-start source-sequence)
+        (sequence-replace-from! s dest-start source-sequence 0
+                                (collection-size source-sequence)))
+       ((s dest-start source-sequence source-start)
+        (sequence-replace-from! s dest-start source-sequence source-start
+                                (collection-size source-sequence)))
+       ((s dest-start source-sequence source-start source-end)
+        (let* ((lst (collection->list s))
+               (src (collection->list source-sequence))
+               (l (- (length lst) 1))
+               (start (take lst dest-start))
+               (middle (drop (take src (min l source-end)) source-start)))
+          (collection-list-set! s (append start middle
+                                          (drop lst (- (length lst)
+                                                       (+ (length start)
+                                                          (length middle)))))))
+        s)))
 
-   (define-record-type (<list> <flexible-sequence>)
-     (mk-list fseq)
-     list?)
+    (define (sequence-fold-keys-left col func seed . seeds)
+      (apply list-fold-keys-left (collection->list col) func seed seeds))
 
-   (define make-list
-     (case-lambda
-      (() (make-list 0 #f))
-      ((size) (make-list size #f))
-      ((size default)
-       (mk-list (mk-flexible-sequence
-                 (mk-sequence
-                  (mk-bag (mk-collection 'list
-                                         (r7rs:map (lambda _
-                                                     default)
-                                                   (iota size))
-                                         #t #f #f #f #t)
-                          equal?)))))))
+    (define (sequence-fold-keys-right col func seed . seeds)
+      (apply list-fold-keys-right (collection->list col) func seed seeds))
 
-   (define (list . rest)
-     (mk-list (mk-flexible-sequence
-               (mk-sequence
-                (mk-bag (mk-collection 'list rest #t #f #f #f #t)
-                        equal?)))))
+    ;; Flexible sequence (inherit sequence)
 
-   ;; String (inherit sequence)
+    (define-record-type (<flexible-sequence> <sequence>)
+      (mk-flexible-sequence seq)
+      flexible-sequence?)
 
-   (define-record-type (<string> <sequence>)
-     (mk-string seq)
-     string?)
+    (define (make-flexible-sequence)
+      (mk-flexible-sequence
+       (mk-sequence (mk-bag (mk-collection 'flexible-sequence '()
+                                           #f #f #f #f #t)
+                            equal?))))
 
-   (define make-string
-     (case-lambda
-      ((size) (make-string size #\null))
-      ((size default)
-       (unless (char? default)
-         (error "String contents must be a character" default))
-       (mk-string (mk-sequence
-                   (mk-bag (mk-collection 'string
+    (define (flexible-sequence . rest)
+      (mk-flexible-sequence
+       (mk-sequence (mk-bag (mk-collection 'flexible-sequence rest
+                                           #f #f #f #f #t)
+                            equal?))))
+
+    (define (flexible-sequence-insert fs idx val)
+      ((get-constructor fs)
+       (let ((lst (collection->list fs)))
+         (append (take lst idx)
+                 (r7rs:list val)
+                 (drop lst idx)))))
+
+    (define (flexible-sequence-insert! fs idx val)
+      (collection-list-set!
+       fs
+       (let ((lst (collection->list fs)))
+         (append (take lst idx)
+                 (r7rs:list val)
+                 (drop lst idx)))))
+
+    (define (flexible-sequence-delete-at fs idx)
+      ((get-constructor fs)
+       (let ((lst (collection->list fs)))
+         (append (take lst idx)
+                 (drop lst (+ idx 1))))))
+
+    (define (flexible-sequence-delete-at! fs idx)
+      (collection-list-set!
+       fs
+       (let ((lst (collection->list fs)))
+         (append (take lst idx)
+                 (drop lst (+ idx 1)))))
+      fs)
+
+    ;; Vector (inherit sequence)
+
+    (define-record-type (<vector> <sequence>)
+      (mk-vector seq)
+      vector?)
+
+    (define make-vector
+      (case-lambda
+       ((size) (make-vector size #f))
+       ((size default)
+        (mk-vector (mk-sequence (mk-bag (mk-collection 'vector
+                                                       (r7rs:map (lambda _
+                                                                   default)
+                                                                 (iota size))
+                                                       #t #f #t #f #f)
+                                        equal?))))))
+
+    (define (vector . rest)
+      (mk-vector (mk-sequence (mk-bag (mk-collection 'vector rest
+                                                     #t #f #t #f #f)
+                                      equal?))))
+
+    ;; List (inherit flexible sequence)
+
+    (define-record-type (<list> <flexible-sequence>)
+      (mk-list fseq)
+      list?)
+
+    (define make-list
+      (case-lambda
+       (() (make-list 0 #f))
+       ((size) (make-list size #f))
+       ((size default)
+        (mk-list (mk-flexible-sequence
+                  (mk-sequence
+                   (mk-bag (mk-collection 'list
                                           (r7rs:map (lambda _
                                                       default)
                                                     (iota size))
-                                          #t #f #t #f #f)
-                           char=?))))))
+                                          #t #f #f #f #t)
+                           equal?)))))))
 
-   (define (string . rest)
-     (unless (every char? rest)
-       (error "String contents must be a character" rest))
-     (mk-string (mk-sequence
-                 (mk-bag (mk-collection 'string rest #t #f #t #f #f)
-                         char=?))))
+    (define (list . rest)
+      (mk-list (mk-flexible-sequence
+                (mk-sequence
+                 (mk-bag (mk-collection 'list rest #t #f #f #f #t)
+                         equal?)))))
 
-   ;; alist-map (inherit map)
+    ;; String (inherit sequence)
 
-   (define-record-type (<alist-map> <map>)
-     (mk-alist-map mp)
-     alist-map?)
+    (define-record-type (<string> <sequence>)
+      (mk-string seq)
+      string?)
 
-   (define (make-alist-map equiv)
-     (mk-alist-map (mk-map (mk-collection 'alist-map '() #f #f #f #f #f)
-                           equiv equiv)))
+    (define make-string
+      (case-lambda
+       ((size) (make-string size #\null))
+       ((size default)
+        (unless (char? default)
+          (error "String contents must be a character" default))
+        (mk-string (mk-sequence
+                    (mk-bag (mk-collection 'string
+                                           (r7rs:map (lambda _
+                                                       default)
+                                                     (iota size))
+                                           #t #f #t #f #f)
+                            char=?))))))
 
-   (define (alist-map equiv . rest)
-     (unless (every pair? rest)
-       (error "alist-map must be initialized with pairs" rest))
-     (mk-alist-map (mk-map (mk-collection 'alist-map rest #f #f #f #f #f)
-                           equiv equiv)))
-   )
+    (define (string . rest)
+      (unless (every char? rest)
+        (error "String contents must be a character" rest))
+      (mk-string (mk-sequence
+                  (mk-bag (mk-collection 'string rest #t #f #t #f #f)
+                          char=?))))
+
+    ;; alist-map (inherit map)
+
+    (define-record-type (<alist-map> <map>)
+      (mk-alist-map mp)
+      alist-map?)
+
+    (define (make-alist-map equiv)
+      (mk-alist-map (mk-map (mk-collection 'alist-map '() #f #f #f #f #f)
+                            equiv equiv)))
+
+    (define (alist-map equiv . rest)
+      (unless (every pair? rest)
+        (error "alist-map must be initialized with pairs" rest))
+      (mk-alist-map (mk-map (mk-collection 'alist-map rest #f #f #f #f #f)
+                            equiv equiv)))
+  )
   #| (export)
   |#
 )
