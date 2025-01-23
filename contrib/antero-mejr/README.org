@@ -1,0 +1,2 @@
+This directory contains an implementation of SRFI 44 provided by
+Antero Mejr.
